@@ -181,7 +181,7 @@ const isShipmentValueValid = (packageValue, minShipmentValueUsd, usdToInrRate) =
 const getPreviousDate = () => {
     const today = new Date();
     const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 2);
+    yesterday.setDate(today.getDate() - 1);
     
     const day = String(yesterday.getDate()).padStart(2, '0');
     const month = String(yesterday.getMonth() + 1).padStart(2, '0');
@@ -308,8 +308,10 @@ const calculateETA = (pickupDate, businessDays) => {
             }
         }
         
-        // Return in YYYY-MM-DD format
-        return currentDate.toISOString().split('T')[0];
+        // Return in YYYY-MM-DD HH:MM:SS format with static time
+        const dateStr = currentDate.toISOString().split('T')[0];
+        const staticTime = "00:00:00"; // Static delivery time (midnight)
+        return `${dateStr} ${staticTime}`;
     } catch (error) {
         console.error('Error calculating ETA:', error.message);
         return null;
