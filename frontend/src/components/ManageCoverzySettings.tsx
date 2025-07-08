@@ -24,7 +24,9 @@ const ManageCoverzySettings = () => {
   const [maxShipments, setMaxShipments] = useState('');
   const [cutoffTime, setCutoffTime] = useState('');
   const [cipTime, setCipTime] = useState('');
-  const [adminEmail, setAdminEmail] = useState('');
+  const [minShipmentValueUsd, setMinShipmentValueUsd] = useState('');
+  const [usdToInrRate, setUsdToInrRate] = useState('');
+  const [adminEmails, setAdminEmails] = useState(['']);
   
   // Email service toggle
   const [emailEnabled, setEmailEnabled] = useState(true);
@@ -62,7 +64,9 @@ const ManageCoverzySettings = () => {
         setMaxShipments(settings.max_shipments?.toString() || '');
         setCutoffTime(settings.cutoff_time || '');
         setCipTime(settings.cip_time || '');
-        setAdminEmail(settings.admin_email || '');
+        setMinShipmentValueUsd(settings.min_shipment_value_usd?.toString() || '');
+        setUsdToInrRate(settings.usd_to_inr_rate?.toString() || '');
+        setAdminEmails(settings.admin_emails ? settings.admin_emails.split(',').map(email => email.trim()) : ['']);
         
         // Store original values for comparison
         setOriginalValues({
@@ -71,7 +75,9 @@ const ManageCoverzySettings = () => {
           max_shipments: settings.max_shipments?.toString() || '',
           cutoff_time: settings.cutoff_time || '',
           cip_time: settings.cip_time || '',
-          admin_email: settings.admin_email || ''
+          min_shipment_value_usd: settings.min_shipment_value_usd?.toString() || '',
+          usd_to_inr_rate: settings.usd_to_inr_rate?.toString() || '',
+          admin_emails: settings.admin_emails ? settings.admin_emails.split(',').map(email => email.trim()) : ['']
         });
 
         
@@ -96,7 +102,7 @@ const ManageCoverzySettings = () => {
 
   const fetchEmailStatus = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/api/email/status`, {
+      const response = await axios.get(`${backendUrl}/api/v1/email/status`, {
         headers: {
           'Authorization': `Bearer ${import.meta.env.VITE_BEARER_TOKEN}`
         }
@@ -118,7 +124,7 @@ const ManageCoverzySettings = () => {
     try {
       setIsTogglingEmail(true);
       
-      const response = await axios.post(`${backendUrl}/api/email/toggle`, {
+      const response = await axios.post(`${backendUrl}/api/v1/email/toggle`, {
         enabled: enabled
       }, {
         headers: {
@@ -150,6 +156,24 @@ const ManageCoverzySettings = () => {
     }
   };
 
+  // Helper functions for managing admin emails
+  const addAdminEmail = () => {
+    setAdminEmails([...adminEmails, '']);
+  };
+
+  const removeAdminEmail = (index) => {
+    if (adminEmails.length > 1) {
+      const newEmails = adminEmails.filter((_, i) => i !== index);
+      setAdminEmails(newEmails);
+    }
+  };
+
+  const updateAdminEmail = (index, value) => {
+    const newEmails = [...adminEmails];
+    newEmails[index] = value;
+    setAdminEmails(newEmails);
+  };
+
   // Count the number of changed fields
   const getChangedFields = () => {
     const currentValues = {
@@ -158,7 +182,9 @@ const ManageCoverzySettings = () => {
       max_shipments: maxShipments,
       cutoff_time: cutoffTime,
       cip_time: cipTime,
-      admin_email: adminEmail
+      min_shipment_value_usd: minShipmentValueUsd,
+      usd_to_inr_rate: usdToInrRate,
+      admin_emails: adminEmails
     };
 
     const changedFields = {};
@@ -203,13 +229,21 @@ const ManageCoverzySettings = () => {
           max_shipments: parseInt(maxShipments),
           cutoff_time: cutoffTime,
           cip_time: cipTime,
-          admin_email: adminEmail
+          min_shipment_value_usd: parseFloat(minShipmentValueUsd),
+          usd_to_inr_rate: parseFloat(usdToInrRate),
+          admin_emails: adminEmails
         };
       } else {
         // PATCH: Send only changed fields
         payload = { ...changedFields };
         if (payload.max_shipments) {
           payload.max_shipments = parseInt(payload.max_shipments);
+        }
+        if (payload.min_shipment_value_usd) {
+          payload.min_shipment_value_usd = parseFloat(payload.min_shipment_value_usd);
+        }
+        if (payload.usd_to_inr_rate) {
+          payload.usd_to_inr_rate = parseFloat(payload.usd_to_inr_rate);
         }
       }
 
@@ -233,7 +267,9 @@ const ManageCoverzySettings = () => {
           max_shipments: maxShipments,
           cutoff_time: cutoffTime,
           cip_time: cipTime,
-          admin_email: adminEmail
+          min_shipment_value_usd: minShipmentValueUsd,
+          usd_to_inr_rate: usdToInrRate,
+          admin_emails: adminEmails
         });
 
         toast({
@@ -367,15 +403,72 @@ const ManageCoverzySettings = () => {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="minShipmentValue">Minimum Shipment Value (USD):</Label>
+                  <Input
+                    id="minShipmentValue"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={minShipmentValueUsd}
+                    onChange={(e) => setMinShipmentValueUsd(e.target.value)}
+                    placeholder="20.00"
+                  />
+                  <p className="text-xs text-gray-600">
+                    Shipments below this USD value will be rejected
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="usdToInrRate">USD to INR Exchange Rate:</Label>
+                  <Input
+                    id="usdToInrRate"
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={usdToInrRate}
+                    onChange={(e) => setUsdToInrRate(e.target.value)}
+                    placeholder="83.0000"
+                  />
+                  <p className="text-xs text-gray-600">
+                    Rate used to convert INR shipment values to USD for validation
+                  </p>
+                </div>
+              </div>
+
               <div className="space-y-2">
-                <Label htmlFor="adminEmail">Super Admin Email:</Label>
-                <Input
-                  id="adminEmail"
-                  type="email"
-                  value={adminEmail}
-                  onChange={(e) => setAdminEmail(e.target.value)}
-                  placeholder="admin@example.com"
-                />
+                <Label>Admin Emails:</Label>
+                {adminEmails.map((email, index) => (
+                  <div key={index} className="flex gap-2">
+                    <Input
+                      type="email"
+                      value={email}
+                      onChange={(e) => updateAdminEmail(index, e.target.value)}
+                      placeholder="admin@example.com"
+                    />
+                    {adminEmails.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => removeAdminEmail(index)}
+                        className="px-3"
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addAdminEmail}
+                  className="w-fit"
+                >
+                  + Add Another Email
+                </Button>
               </div>
 
               <div className="space-y-3">

@@ -69,7 +69,9 @@ const getCoverzySettings = async () => {
                 destination_countries,
                 max_shipments,
                 cutoff_time,
-                cip_time
+                cip_time,
+                min_shipment_value_usd,
+                usd_to_inr_rate
             FROM coverzy_settings 
             ORDER BY created_at DESC 
             LIMIT 1
@@ -82,7 +84,9 @@ const getCoverzySettings = async () => {
                 countries: settings.destination_countries.split(',').map(country => country.trim()),
                 maxShipments: settings.max_shipments,
                 cutoffTime: settings.cutoff_time,
-                cipTime: settings.cip_time
+                cipTime: settings.cip_time,
+                minShipmentValueUsd: settings.min_shipment_value_usd,
+                usdToInrRate: settings.usd_to_inr_rate
             };
         } else {
             throw new Error('No coverzy settings found in database');
@@ -135,18 +139,41 @@ const isPickupTimeValid = (pickupTime, cutoffTime, cipTime) => {
         
         const pickupMinutes = timeToMinutes(pickupTimeStr);
         const cutoffMinutes = timeToMinutes(cutoffTime);
-        const cipMinutes = timeToMinutes(cipTime);
         
-        // Check if pickup time is between cutoff and cip time
-        if (cutoffMinutes <= cipMinutes) {
-            // Normal case: cutoff is before cip (e.g., 19:00 to 23:30)
-            return pickupMinutes >= cutoffMinutes && pickupMinutes <= cipMinutes;
-        } else {
-            // Cross midnight case: cutoff is after cip (e.g., 23:00 to 02:00)
-            return pickupMinutes >= cutoffMinutes || pickupMinutes <= cipMinutes;
-        }
+        // Check if pickup time is before the cutoff time
+        return pickupMinutes < cutoffMinutes;
     } catch (error) {
         console.error('Error validating pickup time:', error.message);
+        return false;
+    }
+};
+
+// Convert INR to USD for validation purposes only
+const convertInrToUsd = (inrAmount, usdToInrRate) => {
+    try {
+        const inrValue = parseFloat(inrAmount);
+        const rate = parseFloat(usdToInrRate);
+        
+        if (isNaN(inrValue) || isNaN(rate) || rate <= 0) {
+            throw new Error('Invalid amount or exchange rate');
+        }
+        
+        return inrValue / rate;
+    } catch (error) {
+        console.error('Error converting INR to USD:', error.message);
+        return 0;
+    }
+};
+
+// Validate if shipment value meets minimum USD threshold
+const isShipmentValueValid = (packageValue, minShipmentValueUsd, usdToInrRate) => {
+    try {
+        const usdValue = convertInrToUsd(packageValue, usdToInrRate);
+        const minValue = parseFloat(minShipmentValueUsd);
+        
+        return usdValue >= minValue;
+    } catch (error) {
+        console.error('Error validating shipment value:', error.message);
         return false;
     }
 };
@@ -154,7 +181,7 @@ const isPickupTimeValid = (pickupTime, cutoffTime, cipTime) => {
 const getPreviousDate = () => {
     const today = new Date();
     const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
+    yesterday.setDate(today.getDate() - 2);
     
     const day = String(yesterday.getDate()).padStart(2, '0');
     const month = String(yesterday.getMonth() + 1).padStart(2, '0');
@@ -241,6 +268,87 @@ const getCustomerDetails = async (customerId) => {
     }
 };
 
+// Calculate ETA based on pickup date and business days
+const calculateETA = (pickupDate, businessDays) => {
+    try {
+        // Parse the pickup date (assuming format: YYYY-MM-DD HH:MM:SS or DD-MM-YYYY HH:MM:SS)
+        let date;
+        if (pickupDate.includes(' ')) {
+            const dateStr = pickupDate.split(' ')[0];
+            if (dateStr.includes('-')) {
+                const parts = dateStr.split('-');
+                if (parts[0].length === 4) {
+                    // YYYY-MM-DD format
+                    date = new Date(dateStr);
+                } else {
+                    // DD-MM-YYYY format
+                    const [day, month, year] = parts;
+                    date = new Date(year, month - 1, day);
+                }
+            }
+        } else {
+            date = new Date(pickupDate);
+        }
+
+        if (isNaN(date.getTime())) {
+            throw new Error('Invalid pickup date format');
+        }
+
+        // Add business days (excluding weekends)
+        let currentDate = new Date(date);
+        let addedDays = 0;
+        
+        while (addedDays < businessDays) {
+            currentDate.setDate(currentDate.getDate() + 1);
+            const dayOfWeek = currentDate.getDay();
+            
+            // Skip weekends (0 = Sunday, 6 = Saturday)
+            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+                addedDays++;
+            }
+        }
+        
+        // Return in YYYY-MM-DD format
+        return currentDate.toISOString().split('T')[0];
+    } catch (error) {
+        console.error('Error calculating ETA:', error.message);
+        return null;
+    }
+};
+
+// Get carrier code and delivery days based on destination and service type
+const getCarrierInfo = (destinationCountry, serviceType) => {
+    const destination = destinationCountry.toUpperCase();
+    const service = serviceType.toLowerCase();
+    
+    // USA mapping
+    if (destination === 'USA' || destination === 'US' || destination === 'UNITED STATES') {
+        if (service === 'ship+') {
+            return { carrierCode: 'USPS', deliveryDays: 15 };
+        } else if (service === 'shipd') {
+            return { carrierCode: 'USPS', deliveryDays: 12 };
+        }
+    }
+    
+    // UK/GB mapping - handle all possible variations
+    if (destination === 'UK' || 
+        destination === 'GB' || destination === 'UNITED KINGDOM') {
+        if (service === 'ship+') {
+            return { carrierCode: 'Royal Mail', deliveryDays: 10 };
+        } else if (service === 'shipd') {
+            return { carrierCode: 'Royal Mail', deliveryDays: 8 };
+        }
+    }
+    
+    return null; // Unsupported combination
+};
+
+// Validate service type and destination combination
+const isServiceDestinationValid = (destinationCountry, serviceType) => {
+    const carrierInfo = getCarrierInfo(destinationCountry, serviceType);
+    return carrierInfo !== null;
+};
+
 const mapShipmentDetailsToPayload = async(shipmentDetails) => {
     // Get customer details using Customer_ID from shipment
     const customerDetails = await getCustomerDetails(shipmentDetails.Customer_ID);
@@ -250,6 +358,10 @@ const mapShipmentDetailsToPayload = async(shipmentDetails) => {
     const customerAddresses = customerDetails ? customerDetails[1] : [];
     const registeredAddress = customerAddresses.find(addr => addr.label === "Registered Address") || {};
 
+    // Get carrier info and calculate ETA
+    const carrierInfo = getCarrierInfo(shipmentDetails.Destination_Country, shipmentDetails.Service_Type);
+    const eta = carrierInfo ? calculateETA(shipmentDetails.Create_Pick_Up_Date, carrierInfo.deliveryDays) : null;
+
     const payload = {
         "transportMode": "air",
         "shipment": {
@@ -257,15 +369,15 @@ const mapShipmentDetailsToPayload = async(shipmentDetails) => {
           "departureDate": shipmentDetails.Create_Pick_Up_Date,
           "origin": "IN",
           "destination": shipmentDetails.Destination_Country,
-          "eta": shipmentDetails.Create_Pick_Up_Date,
-          "carrierCode": "FX",
+          "eta": eta,
+          "carrierCode": carrierInfo ? carrierInfo.carrierCode : null,
           "value": {
             "amount": shipmentDetails.Package_Value,
             "currency": "INR"
           },
           "goods_description": shipmentDetails.Description
         },
-        "customerName": `${customerInfo.name || ''} ${customerInfo.last_name || ''}`.trim(),
+        "customerName": customerInfo.company_name || "",
         "customerCountry": registeredAddress.country_code || "IN",
         "customerEmail": customerInfo.email || ""
       }
@@ -367,9 +479,20 @@ const validateShipmentOnly = async (awb, settings) => {
             throw new Error(`Destination country '${shipmentDetails.Destination_Country}' not allowed. Allowed countries: ${settings.countries.join(', ')}`);
         }
         
+        // Validate service type and destination combination
+        if (!isServiceDestinationValid(shipmentDetails.Destination_Country, shipmentDetails.Service_Type)) {
+            throw new Error(`Service type '${shipmentDetails.Service_Type}' not supported for destination '${shipmentDetails.Destination_Country}'. Supported combinations: USA(Ship+/ShipD), UK/GB(Ship+/ShipD)`);
+        }
+        
         // Validate pickup time
         if (!isPickupTimeValid(shipmentDetails.Create_Pick_Up_Date, settings.cutoffTime, settings.cipTime)) {
-            throw new Error(`Pickup time '${shipmentDetails.Create_Pick_Up_Date}' not within allowed range (${settings.cutoffTime} - ${settings.cipTime})`);
+            throw new Error(`Pickup time '${shipmentDetails.Create_Pick_Up_Date}' is not before cutoff time (${settings.cutoffTime})`);
+        }
+        
+        // Validate shipment value
+        if (!isShipmentValueValid(shipmentDetails.Package_Value, settings.minShipmentValueUsd, settings.usdToInrRate)) {
+            const usdValue = convertInrToUsd(shipmentDetails.Package_Value, settings.usdToInrRate);
+            throw new Error(`Shipment value ₹${shipmentDetails.Package_Value} ($${usdValue.toFixed(2)}) is below minimum threshold of $${settings.minShipmentValueUsd}`);
         }
         
         // Get customer details for supplier validation
@@ -381,9 +504,17 @@ const validateShipmentOnly = async (awb, settings) => {
             throw new Error(`Supplier '${customerInfo.company_name}' not allowed. Allowed suppliers: ${settings.suppliers.join(', ')}`);
         }
         
+        const usdValue = convertInrToUsd(shipmentDetails.Package_Value, settings.usdToInrRate);
+        const carrierInfo = getCarrierInfo(shipmentDetails.Destination_Country, shipmentDetails.Service_Type);
+        const eta = calculateETA(shipmentDetails.Create_Pick_Up_Date, carrierInfo.deliveryDays);
+        
         console.log(`   ✓ Validation passed for AWB: ${awb}`);
         console.log(`     - Destination: ${shipmentDetails.Destination_Country} ✓`);
+        console.log(`     - Service Type: ${shipmentDetails.Service_Type} ✓`);
+        console.log(`     - Carrier: ${carrierInfo.carrierCode} (${carrierInfo.deliveryDays} business days) ✓`);
+        console.log(`     - ETA: ${eta} ✓`);
         console.log(`     - Pickup Time: ${shipmentDetails.Create_Pick_Up_Date} ✓`);
+        console.log(`     - Shipment Value: ₹${shipmentDetails.Package_Value} ($${usdValue.toFixed(2)}) ✓`);
         console.log(`     - Supplier: ${customerInfo.company_name} ✓`);
         
         return {
@@ -414,9 +545,20 @@ const processShipment = async (awb, settings) => {
             throw new Error(`Destination country '${shipmentDetails.Destination_Country}' not allowed. Allowed countries: ${settings.countries.join(', ')}`);
         }
         
+        // Validate service type and destination combination
+        if (!isServiceDestinationValid(shipmentDetails.Destination_Country, shipmentDetails.Service_Type)) {
+            throw new Error(`Service type '${shipmentDetails.Service_Type}' not supported for destination '${shipmentDetails.Destination_Country}'. Supported combinations: USA(Ship+/ShipD), UK/GB(Ship+/ShipD)`);
+        }
+        
         // Validate pickup time
         if (!isPickupTimeValid(shipmentDetails.Create_Pick_Up_Date, settings.cutoffTime, settings.cipTime)) {
-            throw new Error(`Pickup time '${shipmentDetails.Create_Pick_Up_Date}' not within allowed range (${settings.cutoffTime} - ${settings.cipTime})`);
+            throw new Error(`Pickup time '${shipmentDetails.Create_Pick_Up_Date}' is not before cutoff time (${settings.cutoffTime})`);
+        }
+        
+        // Validate shipment value
+        if (!isShipmentValueValid(shipmentDetails.Package_Value, settings.minShipmentValueUsd, settings.usdToInrRate)) {
+            const usdValue = convertInrToUsd(shipmentDetails.Package_Value, settings.usdToInrRate);
+            throw new Error(`Shipment value ₹${shipmentDetails.Package_Value} ($${usdValue.toFixed(2)}) is below minimum threshold of $${settings.minShipmentValueUsd}`);
         }
         
         // Get customer details for supplier validation
@@ -428,9 +570,17 @@ const processShipment = async (awb, settings) => {
             throw new Error(`Supplier '${customerInfo.company_name}' not allowed. Allowed suppliers: ${settings.suppliers.join(', ')}`);
         }
         
+        const usdValue = convertInrToUsd(shipmentDetails.Package_Value, settings.usdToInrRate);
+        const carrierInfo = getCarrierInfo(shipmentDetails.Destination_Country, shipmentDetails.Service_Type);
+        const eta = calculateETA(shipmentDetails.Create_Pick_Up_Date, carrierInfo.deliveryDays);
+        
         console.log(`   All validations passed for AWB: ${awb}`);
         console.log(`  - Destination: ${shipmentDetails.Destination_Country} ✓`);
+        console.log(`  - Service Type: ${shipmentDetails.Service_Type} ✓`);
+        console.log(`  - Carrier: ${carrierInfo.carrierCode} (${carrierInfo.deliveryDays} business days) ✓`);
+        console.log(`  - ETA: ${eta} ✓`);
         console.log(`  - Pickup Time: ${shipmentDetails.Create_Pick_Up_Date} ✓`);
+        console.log(`  - Shipment Value: ₹${shipmentDetails.Package_Value} ($${usdValue.toFixed(2)}) ✓`);
         console.log(`  - Supplier: ${customerInfo.company_name} ✓`);
         
         // Map shipment details to payload
@@ -525,7 +675,8 @@ const processPreviousDayShipments = async () => {
         console.log(` Loaded coverzy settings:`);
         console.log(`  - Max shipments: ${settings.maxShipments}`);
         console.log(`  - Allowed countries: ${settings.countries.join(', ')}`);
-        console.log(`  - Time range: ${settings.cutoffTime} - ${settings.cipTime}`);
+        console.log(`  - Pickup time validation: Before cutoff time (${settings.cutoffTime})`);
+        console.log(`  - Min shipment value: $${settings.minShipmentValueUsd} (Rate: ₹${settings.usdToInrRate}/USD)`);
         console.log(`  - Allowed suppliers: ${settings.suppliers.length} suppliers loaded`);
         
         // Get all AWB numbers for yesterday only (both fromdate and todate set to yesterday)
@@ -746,7 +897,8 @@ const processShipmentsForDate = async (date) => {
         console.log(`    Loaded coverzy settings:`);
         console.log(`  - Max shipments: ${settings.maxShipments}`);
         console.log(`  - Allowed countries: ${settings.countries.join(', ')}`);
-        console.log(`  - Time range: ${settings.cutoffTime} - ${settings.cipTime}`);
+        console.log(`  - Pickup time validation: Before cutoff time (${settings.cutoffTime})`);
+        console.log(`  - Min shipment value: $${settings.minShipmentValueUsd} (Rate: ₹${settings.usdToInrRate}/USD)`);
         console.log(`  - Allowed suppliers: ${settings.suppliers.length} suppliers loaded`);
         
         // Get all AWB numbers for the specified date
@@ -814,7 +966,12 @@ module.exports = {
     isDestinationAllowed,
     isSupplierAllowed,
     isPickupTimeValid,
+    isShipmentValueValid,
+    convertInrToUsd,
     validateShipmentOnly,
     processValidatedShipment,
-    logErrorToDatabase
+    logErrorToDatabase,
+    calculateETA,
+    getCarrierInfo,
+    isServiceDestinationValid
 };

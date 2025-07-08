@@ -76,7 +76,9 @@ class CoverzySettingsController {
           max_shipments,
           cutoff_time,
           cip_time,
-          admin_email,
+          min_shipment_value_usd,
+          usd_to_inr_rate,
+          admin_emails,
           email_enabled,
           created_at,
           updated_at
@@ -96,7 +98,9 @@ class CoverzySettingsController {
           maxShipments: settings.max_shipments,
           cutoffTime: settings.cutoff_time,
           cipTime: settings.cip_time,
-          adminEmail: settings.admin_email,
+          minShipmentValueUsd: parseFloat(settings.min_shipment_value_usd),
+          usdToInrRate: parseFloat(settings.usd_to_inr_rate),
+          adminEmails: settings.admin_emails.split(',').map(email => email.trim()),
           emailEnabled: Boolean(settings.email_enabled),
           createdAt: settings.created_at,
           updatedAt: settings.updated_at
@@ -147,18 +151,34 @@ class CoverzySettingsController {
         max_shipments,
         cutoff_time,
         cip_time,
-        admin_email,
+        min_shipment_value_usd,
+        usd_to_inr_rate,
+        admin_emails,
         email_enabled
       } = req.body;
       
       // Validation
-      if (!supplier_names || !destination_countries || !max_shipments || !cutoff_time || !cip_time || !admin_email) {
+      if (!supplier_names || !destination_countries || !max_shipments || !cutoff_time || !cip_time || !min_shipment_value_usd || !usd_to_inr_rate || !admin_emails) {
         return res.status(400).json({
           success: false,
           message: 'Missing required fields',
-          required_fields: ['supplier_names', 'destination_countries', 'max_shipments', 'cutoff_time', 'cip_time', 'admin_email'],
+          required_fields: ['supplier_names', 'destination_countries', 'max_shipments', 'cutoff_time', 'cip_time', 'min_shipment_value_usd', 'usd_to_inr_rate', 'admin_emails'],
           optional_fields: ['email_enabled'],
           provided_fields: Object.keys(req.body),
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Handle admin_emails - convert array to comma-separated string if necessary
+      let adminEmailsString;
+      if (Array.isArray(admin_emails)) {
+        adminEmailsString = admin_emails.join(',');
+      } else if (typeof admin_emails === 'string') {
+        adminEmailsString = admin_emails;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: 'admin_emails must be either a string (comma-separated) or an array of email addresses',
           timestamp: new Date().toISOString()
         });
       }
@@ -174,7 +194,9 @@ class CoverzySettingsController {
           max_shipments = ?,
           cutoff_time = ?,
           cip_time = ?,
-          admin_email = ?,
+          min_shipment_value_usd = ?,
+          usd_to_inr_rate = ?,
+          admin_emails = ?,
           email_enabled = ?,
           updated_at = CURRENT_TIMESTAMP
         ORDER BY created_at DESC
@@ -187,7 +209,9 @@ class CoverzySettingsController {
         parseInt(max_shipments),
         cutoff_time,
         cip_time,
-        admin_email,
+        parseFloat(min_shipment_value_usd),
+        parseFloat(usd_to_inr_rate),
+        adminEmailsString,
         email_enabled !== undefined ? email_enabled : true // Default to true if not provided
       ]);
       
@@ -242,7 +266,9 @@ class CoverzySettingsController {
         'max_shipments',
         'cutoff_time',
         'cip_time',
-        'admin_email',
+        'min_shipment_value_usd',
+        'usd_to_inr_rate',
+        'admin_emails',
         'email_enabled'
       ];
       
@@ -253,7 +279,27 @@ class CoverzySettingsController {
       for (const field of allowedFields) {
         if (req.body[field] !== undefined) {
           updateFields[field] = '?';
-          updateValues.push(field === 'max_shipments' ? parseInt(req.body[field]) : req.body[field]);
+          let value = req.body[field];
+          
+          // Handle numeric fields with proper parsing
+          if (field === 'max_shipments') {
+            value = parseInt(value);
+          } else if (field === 'min_shipment_value_usd' || field === 'usd_to_inr_rate') {
+            value = parseFloat(value);
+          } else if (field === 'admin_emails') {
+            // Handle admin_emails - convert array to comma-separated string if necessary
+            if (Array.isArray(value)) {
+              value = value.join(',');
+            } else if (typeof value !== 'string') {
+              return res.status(400).json({
+                success: false,
+                message: 'admin_emails must be either a string (comma-separated) or an array of email addresses',
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+          
+          updateValues.push(value);
         }
       }
       
@@ -331,9 +377,11 @@ class CoverzySettingsController {
         supplier_names: 'V T GEMS,MACHINERY AND AUTOCRAFT STORE,AURA GEMSTONES,GEMS PLANET,YAHVI FASHION,JEWELLERY HUB,MINI AUTO ELEKTRIK PRODUCTS,R.K. INTERNATIONAL,SHREEJI FASHION,The Medical Equipment Co.,vintagemetalcustoms,USMANI SUPER STORE,Jewels Central,TUSHANT DENTAL DEPOT,Teaxpress Private Limited',
         destination_countries: 'US,GB,UK',
         max_shipments: 20,
-        cutoff_time: '19:00:00',
-        cip_time: '23:30:00',
-        admin_email: 'intern.tech@logilinkscs.com',
+        cutoff_time: '23:29:00',
+        cip_time: '11:00:00',
+        min_shipment_value_usd: 20.00,
+        usd_to_inr_rate: 83.0000,
+        admin_emails: 'intern.tech@logilinkscs.com',
         email_enabled: true
       };
       
@@ -345,7 +393,9 @@ class CoverzySettingsController {
           max_shipments = ?,
           cutoff_time = ?,
           cip_time = ?,
-          admin_email = ?,
+          min_shipment_value_usd = ?,
+          usd_to_inr_rate = ?,
+          admin_emails = ?,
           email_enabled = ?,
           updated_at = CURRENT_TIMESTAMP
         ORDER BY created_at DESC
@@ -358,7 +408,9 @@ class CoverzySettingsController {
         defaultSettings.max_shipments,
         defaultSettings.cutoff_time,
         defaultSettings.cip_time,
-        defaultSettings.admin_email,
+        defaultSettings.min_shipment_value_usd,
+        defaultSettings.usd_to_inr_rate,
+        defaultSettings.admin_emails,
         defaultSettings.email_enabled
       ]);
       
@@ -770,7 +822,7 @@ class CoverzySettingsController {
       connection = await pool.getConnection();
       
       const [rows] = await connection.execute(`
-        SELECT email_enabled, admin_email 
+        SELECT email_enabled, admin_emails 
         FROM coverzy_settings 
         ORDER BY created_at DESC 
         LIMIT 1
@@ -784,7 +836,7 @@ class CoverzySettingsController {
           message: 'Email service status retrieved successfully',
           data: {
             emailEnabled: Boolean(settings.email_enabled),
-            adminEmail: settings.admin_email,
+            adminEmails: settings.admin_emails.split(',').map(email => email.trim()),
             status: settings.email_enabled ? 'enabled' : 'disabled'
           },
           timestamp: new Date().toISOString()
@@ -847,7 +899,7 @@ class CoverzySettingsController {
       if (result.affectedRows > 0) {
         // Fetch the updated settings
         const [updatedRows] = await connection.execute(`
-          SELECT email_enabled, admin_email 
+          SELECT email_enabled, admin_emails 
           FROM coverzy_settings 
           ORDER BY created_at DESC 
           LIMIT 1
@@ -860,7 +912,7 @@ class CoverzySettingsController {
           message: `Email service ${enabled ? 'enabled' : 'disabled'} successfully`,
           data: {
             emailEnabled: Boolean(settings.email_enabled),
-            adminEmail: settings.admin_email,
+            adminEmails: settings.admin_emails.split(',').map(email => email.trim()),
             status: settings.email_enabled ? 'enabled' : 'disabled',
             previousStatus: enabled ? 'disabled' : 'enabled'
           },

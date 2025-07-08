@@ -1,3 +1,4 @@
+import lexshipLogo from "@/assets/lexship.png";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -57,7 +58,7 @@ const LoginForm = () => {
         <CardHeader className="text-center pb-6">
           {/* Logo */}
           <div className="flex justify-center mb-4">
-            <img src="./src/assets/lexship.png" alt="LexCoverzy Admin" className="w-36 h-10" />
+            <img src={lexshipLogo} alt="LexCoverzy Admin" className="w-36 h-10" />
           </div>
           <CardTitle className="text-3xl font-bold text-gray-900 mb-2">LexCoverzy Admin</CardTitle>
           <CardDescription className="text-gray-600">

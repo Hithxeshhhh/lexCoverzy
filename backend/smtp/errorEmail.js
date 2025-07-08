@@ -37,7 +37,7 @@ const getEmailSettings = async () => {
     try {
         connection = await pool.getConnection();
         const [rows] = await connection.execute(`
-            SELECT admin_email, email_enabled 
+            SELECT admin_emails, email_enabled 
             FROM coverzy_settings 
             ORDER BY created_at DESC 
             LIMIT 1
@@ -45,7 +45,7 @@ const getEmailSettings = async () => {
         
         if (rows.length > 0) {
             return {
-                adminEmail: rows[0].admin_email,
+                adminEmails: rows[0].admin_emails.split(',').map(email => email.trim()),
                 emailEnabled: rows[0].email_enabled || false
             };
         } else {
@@ -65,7 +65,7 @@ const getEmailSettings = async () => {
 // Get admin email from coverzy_settings table (backward compatibility)
 const getAdminEmail = async () => {
     const settings = await getEmailSettings();
-    return settings?.adminEmail || null;
+    return settings?.adminEmails?.[0] || null;
 };
 
 // Send cron job error notification email
@@ -233,26 +233,26 @@ LexCoverzy Automated Monitoring System
         `;
 
         const fromAddress = process.env.MAIL_FROM_ADDRESS || process.env.MAIL_USERNAME;
-        const adminEmail = emailSettings.adminEmail;
+        const adminEmails = emailSettings.adminEmails;
         
-        if (!adminEmail) {
-            console.error('❌ Cannot send email: No admin email found in coverzy_settings');
+        if (!adminEmails || adminEmails.length === 0) {
+            console.error('❌ Cannot send email: No admin emails found in coverzy_settings');
             return {
                 success: false,
-                error: 'No admin email configured in coverzy_settings'
+                error: 'No admin emails configured in coverzy_settings'
             };
         }
         
         const mailOptions = {
             from: `"LexCoverzy Alerts" <${fromAddress}>`,
-            to: adminEmail,
+            to: adminEmails.join(','), // Send to all admin emails
             subject: subject,
             text: textBody,
             html: htmlBody
         };
 
         const info = await transporter.sendMail(mailOptions);
-        console.log('✅ Error notification email sent successfully:', info.messageId);
+        console.log(`✅ Error notification email sent successfully to ${adminEmails.length} recipients:`, info.messageId);
         
         return {
             success: true,
@@ -384,25 +384,25 @@ const sendDailySummaryEmail = async (summaryData) => {
         `;
 
         const fromAddress = process.env.MAIL_FROM_ADDRESS || process.env.MAIL_USERNAME;
-        const adminEmail = emailSettings.adminEmail;
+        const adminEmails = emailSettings.adminEmails;
         
-        if (!adminEmail) {
-            console.error('❌ Cannot send daily summary email: No admin email found in coverzy_settings');
+        if (!adminEmails || adminEmails.length === 0) {
+            console.error('❌ Cannot send daily summary email: No admin emails found in coverzy_settings');
             return {
                 success: false,
-                error: 'No admin email configured in coverzy_settings'
+                error: 'No admin emails configured in coverzy_settings'
             };
         }
         
         const mailOptions = {
             from: `"LexCoverzy Reports" <${fromAddress}>`,
-            to: adminEmail,
+            to: adminEmails.join(','), // Send to all admin emails
             subject: subject,
             html: htmlBody
         };
 
         const info = await transporter.sendMail(mailOptions);
-        console.log('✅ Daily summary email sent successfully:', info.messageId);
+        console.log(`✅ Daily summary email sent successfully to ${adminEmails.length} recipients:`, info.messageId);
         
         return { success: true, messageId: info.messageId };
 
