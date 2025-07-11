@@ -181,7 +181,7 @@ const sendCronErrorEmail = async (errorData) => {
                         <li>Verify database connectivity and API endpoints</li>
                         <li>Review Coverzy settings for any recent changes</li>
                         <li>Monitor the next scheduled run for auto-recovery</li>
-                        <li>Check error logs table: <code>cron_error_logs</code></li>
+                        <li>Check error logs table: <code>coverzy_error_logs</code></li>
                     </ul>
                 </div>
             </div>
@@ -226,7 +226,7 @@ RECOMMENDED ACTIONS:
 - Verify database and API connectivity
 - Review Coverzy settings
 - Monitor next scheduled run
-- Check cron_error_logs table
+- Check coverzy_error_logs table
 
 ---
 LexCoverzy Automated Monitoring System

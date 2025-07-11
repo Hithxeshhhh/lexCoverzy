@@ -30,7 +30,7 @@ const logErrorToDatabase = async (errorData) => {
         } = errorData;
 
         const insertQuery = `
-            INSERT INTO cron_error_logs 
+            INSERT INTO coverzy_error_logs 
             (job_name, error_type, error_message, error_details, execution_date, shipment_awb) 
             VALUES (?, ?, ?, ?, ?, ?)
         `;
